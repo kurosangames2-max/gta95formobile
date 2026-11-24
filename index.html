@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="screen-orientation" content="landscape">
+    <title>Vice Poly 3D — Mobile Sandbox</title>
+    <!-- Подключаем Three.js r128 через стабильный CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Базовый сброс и запрет на выделение, скролл и стандартные жесты браузера */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a2639;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            touch-action: none;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Слой пользовательского интерфейса поверх 3D-сцены */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Пропускаем касания в зону камеры */
+            padding: env(safe-area-inset-top, 12px) env(safe-area-inset-right, 16px) env(safe-area-inset-bottom, 16px) env(safe-area-inset-left, 16px);
+        }
+
+        /* Сенсорная зона для вращения камеры пальцем */
+        #camera-touch-zone {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 5;
+            pointer-events: auto;
+        }
+
+        /* ================= HUD: ВЕРХНИЙ ЛЕВЫЙ УГОЛ (МИНИ-КАРТА) ================= */
+        #minimap-container {
+            position: absolute;
+            top: 14px;
+            left: 16px;
+            width: 124px;
+            height: 124px;
+            border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.85);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 12px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+            background: #1e272e;
+            pointer-events: none;
+        }
+
+        #minimap-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .minimap-north {
+            position: absolute;
+            top: 3px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.75);
+            color: #ffdd59;
+            font-size: 9px;
+            font-weight: 800;
+            padding: 1px 4px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        /* ================= HUD: ВЕРХНИЙ ПРАВЫЙ УГОЛ (СТАТУСЫ GTA) ================= */
+        #hud-top-right {
+            position: absolute;
+            top: 14px;
+            right: 18px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+            pointer-events: none;
+        }
+
+        #money-display {
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 26px;
+            color: #4cd137;
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+            letter-spacing: 1px;
+            transition: transform 0.15s ease;
+        }
+
+        #money-display.pop {
+            transform: scale(1.18);
+            color: #a3ff94;
+        }
+
+        .bar-wrapper {
+            width: 145px;
+            height: 14px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 2px solid #000;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #2ecc71, #55efc4);
+            transition: width 0.2s ease;
+        }
+
+        #speedometer {
+            display: none;
+            margin-top: 4px;
+            background: rgba(15, 20, 28, 0.75);
+            border: 1.5px solid rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(4px);
+            padding: 4px 10px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 800;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+        }
+
+        #speedometer span {
+            color: #ff9f43;
+            font-size: 20px;
+            font-family: 'Impact', sans-serif;
+        }
+
+        #vehicle-name-toast {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            font-family: 'Impact', 'Arial Black', sans-serif;
+            font-size: 22px;
+            color: #feca57;
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000;
+            letter-spacing: 1.2px;
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+            text-align: center;
+        }
+
+        #vehicle-name-toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* ================= ВИРТУАЛЬНЫЙ ДЖОЙСТИК (СЛЕВА ВНИЗУ) ================= */
+        #joystick-zone {
+            position: absolute;
+            bottom: 16px;
+            left: 20px;
+            width: 145px;
+            height: 145px;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #joystick-base {
+            width: 124px;
+            height: 124px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.14);
+            border: 2px solid rgba(255, 255, 255, 0.38);
+            backdrop-filter: blur(4px);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.35);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #joystick-knob {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.9), rgba(200, 214, 229, 0.65));
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            position: absolute;
+            transform: translate(0px, 0px);
+            transition: transform 0.04s linear;
+        }
+
+        /* ================= СЕНСОРНЫЕ КНОПКИ ДЕЙСТВИЙ (СПРАВА ВНИЗУ) ================= */
+        #controls-right {
+            position: absolute;
+            bottom: 18px;
+            right: 22px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 12px;
+        }
+
+        .control-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 14px;
+            pointer-events: none;
+        }
+
+        .touch-btn {
+            pointer-events: auto;
+            width: 68px;
+            height: 68px;
+            border-radius: 50%;
+            background: rgba(25, 34, 48, 0.55);
+            border: 2.5px solid rgba(255, 255, 255, 0.55);
+            backdrop-filter: blur(5px);
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+            transition: transform 0.08s ease, background 0.1s ease, border-color 0.1s ease;
+        }
+
+        .touch-btn svg {
+            width: 26px;
+            height: 26px;
+            fill: currentColor;
+        }
+
+        .touch-btn span {
+            font-size: 9px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .touch-btn.active, .touch-btn:active {
+            transform: scale(0.91);
+            background: rgba(255, 255, 255, 0.35);
+            border-color: #ffffff;
+        }
+
+        /* Кнопка входа в авто (подсвечивается при приближении) */
+        #btn-enter-car {
+            display: none;
+            background: rgba(243, 156, 18, 0.78);
+            border-color: #ffeaa7;
+            animation: pulseBtn 1.3s infinite ease-in-out;
+        }
+
+        @keyframes pulseBtn {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 12px rgba(243, 156, 18, 0.6); }
+            50% { transform: scale(1.06); box-shadow: 0 0 20px rgba(255, 234, 167, 0.9); }
+        }
+
+        /* Кнопки управления автомобилем */
+        #btn-gas {
+            width: 76px;
+            height: 76px;
+            background: rgba(39, 174, 96, 0.62);
+            border-color: rgba(163, 255, 198, 0.8);
+        }
+        #btn-gas.active {
+            background: rgba(46, 204, 113, 0.9);
+        }
+
+        #btn-brake {
+            width: 66px;
+            height: 66px;
+            background: rgba(192, 57, 43, 0.62);
+            border-color: rgba(255, 168, 168, 0.8);
+        }
+        #btn-brake.active {
+            background: rgba(231, 76, 60, 0.9);
+        }
+
+        #btn-exit-car {
+            width: 56px;
+            height: 56px;
+            background: rgba(52, 73, 94, 0.72);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* ================= ПРЕДУПРЕЖДЕНИЕ О ПОРТРЕТНОЙ ОРИЕНТАЦИИ ================= */
+        #orientation-warning {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: rgba(15, 23, 42, 0.86);
+            backdrop-filter: blur(8px);
+            color: #fff;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 24px;
+            gap: 16px;
+            pointer-events: auto;
+        }
+
+        #orientation-warning svg {
+            width: 64px;
+            height: 64px;
+            fill: #feca57;
+            animation: rotatePhone 2s infinite ease-in-out;
+        }
+
+        @keyframes rotatePhone {
+            0%, 20% { transform: rotate(0deg); }
+            50%, 80% { transform: rotate(-90deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        #orientation-warning h2 {
+            font-size: 20px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
+        #orientation-warning p {
+            font-size: 14px;
+            color: #cbd5e1;
+            max-width: 280px;
+        }
+
+        #dismiss-orientation {
+            margin-top: 8px;
+            padding: 10px 20px;
+            border-radius: 12px;
+            border: 1.5px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            font-weight: 700;
+            font-size: 13px;
+        }
+
+        @media screen and (orientation: portrait) {
+            #orientation-warning.active-warning {
+                display: flex;
+            }
+        }
+
+        /* Подсказка управления для ПК внизу по центру (едва заметная) */
+        #pc-hint {
+            position: absolute;
+            top: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.38);
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        @media (pointer: coarse) {
+            #pc-hint { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Холст игры -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Зона свайпа для вращения камеры -->
+    <div id="camera-touch-zone"></div>
+
+    <!-- Интерфейс пользователя (HUD и кнопки) -->
+    <div id="ui-layer">
+        <!-- Мини-карта -->
+        <div id="minimap-container">
+            <canvas id="minimap-canvas" width="140" height="140"></canvas>
+            <div class="minimap-north">N</div>
+        </div>
+
+        <!-- Подсказка для десктопа -->
+        <div id="pc-hint">WASD / Стрелки — Движение • Пробел — Прыжок / Тормоз • F — Авто • Мышь — Камера</div>
+
+        <!-- Правый верхний HUD (Деньги, Здоровье, Спидометр) -->
+        <div id="hud-top-right">
+            <div id="money-display">$00002500</div>
+            <div class="bar-wrapper">
+                <div id="health-bar"></div>
+            </div>
+            <div id="speedometer"><span id="speed-value">0</span> КМ/Ч</div>
+        </div>
+
+        <!-- Всплывающее название машины при посадке -->
+        <div id="vehicle-name-toast">INFERNUS GT</div>
+
+        <!-- Виртуальный джойстик (Слева внизу) -->
+        <div id="joystick-zone">
+            <div id="joystick-base">
+                <div id="joystick-knob"></div>
+            </div>
+        </div>
+
+        <!-- Кнопки действий (Справа внизу) -->
+        <div id="controls-right">
+            <!-- Группа кнопок: ПЕШКОМ -->
+            <div id="onfoot-controls" class="control-row">
+                <button id="btn-enter-car" class="touch-btn" aria-label="Сесть в авто">
+                    <svg viewBox="0 0 24 24"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+                    <span>В авто</span>
+                </button>
+                <button id="btn-jump" class="touch-btn" aria-label="Прыжок">
+                    <svg viewBox="0 0 24 24"><path d="M12 4l-6 6h4v10h4V10h4l-6-6z"/></svg>
+                    <span>Прыжок</span>
+                </button>
+            </div>
+
+            <!-- Группа кнопок: В АВТОМОБИЛЕ -->
+            <div id="incar-controls" class="hidden" style="display: flex; flex-direction: column; align-items: flex-end; gap: 10px;">
+                <button id="btn-exit-car" class="touch-btn" aria-label="Выйти из авто">
+                    <svg viewBox="0 0 24 24"><path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+                    <span>Выйти</span>
+                </button>
+                <div class="control-row">
+                    <button id="btn-brake" class="touch-btn" aria-label="Тормоз">
+                        <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                        <span>Тормоз</span>
+                    </button>
+                    <button id="btn-gas" class="touch-btn" aria-label="Газ">
+                        <svg viewBox="0 0 24 24"><path d="M7 14l5-5 5 5H7z"/><path d="M7 19l5-5 5 5H7z"/></svg>
+                        <span>Газ</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Уведомление для портретного режима -->
+    <div id="orientation-warning" class="active-warning">
+        <svg viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81 1.33-1.32zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02-6.36 6.36zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05C.56 19.16 5.71 24 12 24l.66-.03-3.81-3.81-1.33 1.32z"/></svg>
+        <h2>Поверните экран горизонтально</h2>
+        <p>Для комфортного управления автомобилем и камерой игра оптимизирована под альбомную ориентацию.</p>
+        <button id="dismiss-orientation">Продолжить так</button>
+    </div>
+
+    <script>
+    /**
+     * VICE POLY 3D — Полноценный Low-Poly прототип GTA для мобильных браузеров
+     * Архитектура:
+     * 1. Инициализация Three.js (оптимизированные тени, туман, рендерер 60 FPS)
+     * 2. Процедурная генерация города 240x240 (сетка дорог, разметка, перекрестки, здания, парк, фонари)
+     * 3. Система AABB и круговых коллизий со скольжением (Sliding Collision)
+     * 4. Игрок с процедурной анимацией конечностей, физикой прыжка и камерой от 3-го лица
+     * 5. Транспорт с аркадной физикой, дрифтом, поворотом колес + система ИИ-трафика
+     * 6. ИИ-пешеходы с маршрутами по тротуарам и реакцией на препятствия
+     * 7. Мультитач-контроллер (джойстик + кнопки + свайп камеры) и 2D мини-карта
+     */
+
+    (function() {
+        'use strict';
+
+        // ================= КОНФИГУРАЦИЯ И ГЛОБАЛЬНОЕ СОСТОЯНИЕ =================
+        const WORLD_SIZE = 240;
+        const HALF_WORLD = WORLD_SIZE / 2;
+        const ROAD_COORDS = [-80, 0, 80]; // Оси дорог по X и Z
+        const ROAD_WIDTH = 16;
+        const SIDEWALK_WIDTH = 4;
+
+        const state = {
+            money: 2500,
+            health: 100,
+            mode: 'onfoot', // 'onfoot' | 'incar'
+            currentVehicle: null,
+            nearestVehicle: null,
+            cameraYaw: Math.PI, // Камера смотрит сзади игрока
+            cameraPitch: 0.32,
+            cameraDist: 9.5,
+            isLoaded: false
+        };
+
+        // Ввод с сенсорного экрана и клавиатуры
+        const input = {
+            joyX: 0,
+            joyY: 0,
+            jump: false,
+            gas: false,
+            brake: false,
+            keys: {}
+        };
+
+        // Списки игровых сущностей и коллайдеров
+        const colliders = [];     // { minX, maxX, minZ, maxZ, type }
+        const circleColliders = []; // { x, z, r } (деревья, фонари)
+        const buildingsData = []; // Для отрисовки на мини-карте
+        const vehicles = [];
+        const pedestrians = [];
+        const moneyPickups = [];
+
+        // ================= ИНИЦИАЛИЗАЦИЯ THREE.JS =================
+        const canvas = document.getElementById('game-canvas');
+        const renderer = new THREE.WebGLRenderer({
+            canvas: canvas,
+            antialias: true,
+            powerPreference: 'high-performance'
+        });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+
+        const scene = new THREE.Scene();
+        const skyColor = new THREE.Color(0x74b9ff);
+        scene.background = skyColor;
+        scene.fog = new THREE.Fog(skyColor, 55, 165);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.5, 220);
+
+        // Освещение: мягкий рассеянный свет + направленное солнце с оптимизированной теневой камерой
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.62);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff5e4, 0.85);
+        dirLight.position.set(45, 75, 35);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        dirLight.shadow.camera.near = 10;
+        dirLight.shadow.camera.far = 180;
+        const shadowRange = 55;
+        dirLight.shadow.camera.left = -shadowRange;
+        dirLight.shadow.camera.right = shadowRange;
+        dirLight.shadow.camera.top = shadowRange;
+        dirLight.shadow.camera.bottom = -shadowRange;
+        dirLight.shadow.bias = -0.001;
+        scene.add(dirLight);
+        scene.add(dirLight.target);
+
+        // ================= УТИЛИТЫ МАТЕРИАЛОВ И ГЕОМЕТРИИ =================
+        const matCache = {};
+        function getMat(color, flat = true, emissive = 0x000000) {
+            const key = `${color}_${flat}_${emissive}`;
+            if (!matCache[key]) {
+                matCache[key] = new THREE.MeshLambertMaterial({
+                    color: color,
+                    flatShading: flat,
+                    emissive: emissive
+                });
+            }
+            return matCache[key];
+        }
+
+        function addBoxCollider(x, z, w, d, type = 'building') {
+            colliders.push({
+                minX: x - w / 2,
+                maxX: x + w / 2,
+                minZ: z - d / 2,
+                maxZ: z + d / 2,
+                type: type
+            });
+        }
+
+        // ================= ПОСТРОЕНИЕ ГОРОДА (240x240) =================
+        function buildCity() {
+            const cityGroup = new THREE.Group();
+
+            // 1. Базовая земля (тротуарная плитка по всему городу)
+            const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE + 40, WORLD_SIZE + 40);
+            const groundMat = getMat(0x95a5a6);
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            cityGroup.add(ground);
+
+            // Ограничивающий бордюр по периметру карты (чтобы не выехать за край)
+            const borderThickness = 6;
+            const borderHeight = 4;
+            const wallMat = getMat(0x576574);
+            const borders = [
+                { x: 0, z: -HALF_WORLD - borderThickness/2, w: WORLD_SIZE + 12, d: borderThickness },
+                { x: 0, z: HALF_WORLD + borderThickness/2, w: WORLD_SIZE + 12, d: borderThickness },
+                { x: -HALF_WORLD - borderThickness/2, z: 0, w: borderThickness, d: WORLD_SIZE + 12 },
+                { x: HALF_WORLD + borderThickness/2, z: 0, w: borderThickness, d: WORLD_SIZE + 12 }
+            ];
+            borders.forEach(b => {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, borderHeight, b.d), wallMat);
+                mesh.position.set(b.x, borderHeight / 2, b.z);
+                mesh.receiveShadow = true;
+                cityGroup.add(mesh);
+                addBoxCollider(b.x, b.z, b.w, b.d, 'wall');
+            });
+
+            // 2. Асфальтированные дороги
+            const roadMat = getMat(0x2f3640);
+            const lineMat = getMat(0xf5f6fa);
+
+            ROAD_COORDS.forEach(coord => {
+                // Горизонтальная дорога (вдоль X)
+                const roadH = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_SIZE, ROAD_WIDTH), roadMat);
+                roadH.rotation.x = -Math.PI / 2;
+                roadH.position.set(0, 0.03, coord);
+                roadH.receiveShadow = true;
+                cityGroup.add(roadH);
+
+                // Вертикальная дорога (вдоль Z)
+                const roadV = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, WORLD_SIZE), roadMat);
+                roadV.rotation.x = -Math.PI / 2;
+                roadV.position.set(coord, 0.04, 0);
+                roadV.receiveShadow = true;
+                cityGroup.add(roadV);
+            });
+
+            // 3. Разметка дорог и пешеходные переходы (зебры)
+            const dashGeoH = new THREE.PlaneGeometry(3.2, 0.4);
+            const dashGeoV = new THREE.PlaneGeometry(0.4, 3.2);
+            const zebraStripeH = new THREE.PlaneGeometry(2.6, 0.75);
+            const zebraStripeV = new THREE.PlaneGeometry(0.75, 2.6);
+
+            ROAD_COORDS.forEach(rc => {
+                for (let pos = -HALF_WORLD + 4; pos <= HALF_WORLD - 4; pos += 7) {
+                    // Пропускаем перекрестки
+                    const nearCross = ROAD_COORDS.some(c => Math.abs(pos - c) < ROAD_WIDTH * 0.75);
+                    if (!nearCross) {
+                        const dH = new THREE.Mesh(dashGeoH, lineMat);
+                        dH.rotation.x = -Math.PI / 2;
+                        dH.position.set(pos, 0.06, rc);
+                        cityGroup.add(dH);
+
+                        const dV = new THREE.Mesh(dashGeoV, lineMat);
+                        dV.rotation.x = -Math.PI / 2;
+                        dV.position.set(rc, 0.06, pos);
+                        cityGroup.add(dV);
+                    }
+                }
+
+                // Зебры на каждом перекрестке
+                ROAD_COORDS.forEach(cross => {
+                    const offset = ROAD_WIDTH / 2 + 1.8;
+                    for (let s = -5.5; s <= 5.5; s += 2.2) {
+                        // Север и Юг от перекрестка
+                        [-1, 1].forEach(dir => {
+                            const zH = new THREE.Mesh(zebraStripeV, lineMat);
+                            zH.rotation.x = -Math.PI / 2;
+                            zH.position.set(cross + s, 0.06, rc + dir * offset);
+                            cityGroup.add(zH);
+
+                            const zV = new THREE.Mesh(zebraStripeH, lineMat);
+                            zV.rotation.x = -Math.PI / 2;
+                            zV.position.set(rc + dir * offset, 0.06, cross + s);
+                            cityGroup.add(zV);
+                        });
+                    }
+                });
+            });
+
+            // 4. Кварталы города (4x4 сектора между дорогами)
+            // Координаты центров кварталов: [-104, -40, 40, 104]
+            const blockCenters = [
+                { x: -104, z: -104, w: 32, d: 32 },
+                { x: -40,  z: -104, w: 64, d: 32 },
+                { x: 40,   z: -104, w: 64, d: 32 },
+                { x: 104,  z: -104, w: 32, d: 32 },
+
+                { x: -104, z: -40,  w: 32, d: 64 },
+                { x: -40,  z: -40,  w: 64, d: 64, isPark: true }, // ЦЕНТРАЛЬНЫЙ ПАРК!
+                { x: 40,   z: -40,  w: 64, d: 64 },
+                { x: 104,  z: -40,  w: 32, d: 64 },
+
+                { x: -104, z: 40,   w: 32, d: 64 },
+                { x: -40,  z: 40,   w: 64, d: 64 },
+                { x: 40,   z: 40,   w: 64, d: 64 },
+                { x: 104,  z: 40,   w: 32, d: 64 },
+
+                { x: -104, z: 104,  w: 32, d: 32 },
+                { x: -40,  z: 104,  w: 64, d: 32 },
+                { x: 40,   z: 104,  w: 64, d: 32 },
+                { x: 104,  z: 104,  w: 32, d: 32 }
+            ];
+
+            const buildingPalette = [
+                0xe17055, 0x0984e3, 0xfdcb6e, 0x6c5ce7,
+                0x00cec9, 0xd63031, 0xe84393, 0x74b9ff, 0xfab1a0
+            ];
+
+            let seed = 42;
+            function rand() {
+                seed = (seed * 16807) % 2147483647;
+                return (seed - 1) / 2147483646;
+            }
+
+            blockCenters.forEach(block => {
+                // Подиум тротуара внутри квартала
+                const swW = block.w - SIDEWALK_WIDTH * 2;
+                const swD = block.d - SIDEWALK_WIDTH * 2;
+
+                if (block.isPark) {
+                    buildCentralPark(cityGroup, block.x, block.z, swW, swD, rand);
+                } else {
+                    // Разбиваем квартал на 1–4 здания в зависимости от размера
+                    const cols = block.w > 40 ? 2 : 1;
+                    const rows = block.d > 40 ? 2 : 1;
+                    const cellW = swW / cols;
+                    const cellD = swD / rows;
+
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            const bx = block.x - swW / 2 + cellW * (c + 0.5);
+                            const bz = block.z - swD / 2 + cellD * (r + 0.5);
+                            const bw = cellW - 3.5;
+                            const bd = cellD - 3.5;
+                            const bh = 12 + Math.floor(rand() * 26);
+                            const color = buildingPalette[Math.floor(rand() * buildingPalette.length)];
+
+                            createLowPolyBuilding(cityGroup, bx, bz, bw, bh, bd, color);
+                        }
+                    }
+                }
+            });
+
+            // 5. Уличные фонари вдоль дорог
+            buildStreetLights(cityGroup);
+
+            scene.add(cityGroup);
+        }
+
+        function createLowPolyBuilding(parent, x, z, w, h, d, color) {
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+
+            // Основной корпус
+            const bodyGeo = new THREE.BoxGeometry(w, h, d);
+            const bodyMesh = new THREE.Mesh(bodyGeo, getMat(color));
+            bodyMesh.position.y = h / 2;
+            bodyMesh.castShadow = true;
+            bodyMesh.receiveShadow = true;
+            group.add(bodyMesh);
+
+            // Крыша с парапетом
+            const roofGeo = new THREE.BoxGeometry(w + 0.6, 0.8, d + 0.6);
+            const roofMesh = new THREE.Mesh(roofGeo, getMat(0x34495e));
+            roofMesh.position.y = h + 0.2;
+            roofMesh.castShadow = true;
+            group.add(roofMesh);
+
+            // Декоративные полосы-окна (оптимизировано по числу мешей)
+            const winMat = getMat(0x2c3e50);
+            const floors = Math.floor(h / 5);
+            for (let f = 1; f < floors; f++) {
+                const wy = f * 5;
+                const bandX = new THREE.Mesh(new THREE.BoxGeometry(w + 0.15, 1.1, d * 0.78), winMat);
+                bandX.position.y = wy;
+                group.add(bandX);
+
+                const bandZ = new THREE.Mesh(new THREE.BoxGeometry(w * 0.78, 1.1, d + 0.15), winMat);
+                bandZ.position.y = wy;
+                group.add(bandZ);
+            }
+
+            parent.add(group);
+            addBoxCollider(x, z, w, d, 'building');
+            buildingsData.push({ x, z, w, d, color: '#' + color.toString(16).padStart(6, '0') });
+        }
+
+        function buildCentralPark(parent, cx, cz, w, d, rand) {
+            // Зеленый газон парка
+            const grass = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, d), getMat(0x2ecc71));
+            grass.position.set(cx, 0.12, cz);
+            grass.receiveShadow = true;
+            parent.add(grass);
+
+            // Дорожки в парке (крест-накрест)
+            const pathMat = getMat(0xdfe6e9);
+            const pH = new THREE.Mesh(new THREE.BoxGeometry(w, 0.28, 4), pathMat);
+            pH.position.set(cx, 0.13, cz);
+            pH.receiveShadow = true;
+            parent.add(pH);
+
+            const pV = new THREE.Mesh(new THREE.BoxGeometry(4, 0.28, d), pathMat);
+            pV.position.set(cx, 0.13, cz);
+            pV.receiveShadow = true;
+            parent.add(pV);
+
+            // Центральный фонтан
+            const fountainBase = new THREE.Mesh(new THREE.CylinderGeometry(4.5, 5, 1.1, 12), getMat(0xb2bec3));
+            fountainBase.position.set(cx, 0.65, cz);
+            fountainBase.castShadow = true;
+            fountainBase.receiveShadow = true;
+            parent.add(fountainBase);
+
+            const water = new THREE.Mesh(new THREE.CylinderGeometry(4.0, 4.0, 1.2, 12), getMat(0x00a8ff));
+            water.position.set(cx, 0.68, cz);
+            parent.add(water);
+
+            circleColliders.push({ x: cx, z: cz, r: 5.0 });
+
+            // Деревья и скамейки по углам парка
+            const treeOffsets = [
+                [-16, -16], [-10, -20], [-20, -10],
+                [16, -16],  [10, -20],  [20, -10],
+                [-16, 16],  [-10, 20],  [-20, 10],
+                [16, 16],   [10, 20],   [20, 10]
+            ];
+
+            treeOffsets.forEach(([ox, oz]) => {
+                createLowPolyTree(parent, cx + ox, cz + oz, 0.9 + rand() * 0.4);
+            });
+
+            // Скамейки вдоль центральных аллей
+            const benchCoords = [
+                { x: cx - 10, z: cz - 3.2, rot: 0 },
+                { x: cx + 10, z: cz + 3.2, rot: Math.PI },
+                { x: cx - 3.2, z: cz + 10, rot: Math.PI / 2 },
+                { x: cx + 3.2, z: cz - 10, rot: -Math.PI / 2 }
+            ];
+            benchCoords.forEach(b => {
+                const bench = new THREE.Group();
+                const seat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.35, 1.1), getMat(0xd35400));
+                seat.position.y = 0.65;
+                seat.castShadow = true;
+                const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.8, 0.2), getMat(0xe67e22));
+                back.position.set(0, 1.15, -0.45);
+                back.castShadow = true;
+                bench.add(seat, back);
+                bench.position.set(b.x, 0.2, b.z);
+                bench.rotation.y = b.rot;
+                parent.add(bench);
+                circleColliders.push({ x: b.x, z: b.z, r: 1.4 });
+            });
+
+            buildingsData.push({ x: cx, z: cz, w: w, d: d, color: '#2ecc71', isPark: true });
+        }
+
+        function createLowPolyTree(parent, x, z, scale = 1) {
+            const tree = new THREE.Group();
+            tree.position.set(x, 0.2, z);
+
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.45 * scale, 0.65 * scale, 3.2 * scale, 6), getMat(0x795548));
+            trunk.position.y = 1.6 * scale;
+            trunk.castShadow = true;
+            tree.add(trunk);
+
+            const crown1 = new THREE.Mesh(new THREE.ConeGeometry(2.6 * scale, 3.8 * scale, 7), getMat(0x27ae60));
+            crown1.position.y = 4.2 * scale;
+            crown1.castShadow = true;
+            tree.add(crown1);
+
+            const crown2 = new THREE.Mesh(new THREE.ConeGeometry(1.9 * scale, 3.0 * scale, 7), getMat(0x2ecc71));
+            crown2.position.y = 6.0 * scale;
+            crown2.castShadow = true;
+            tree.add(crown2);
+
+            parent.add(tree);
+            circleColliders.push({ x: x, z: z, r: 1.0 * scale });
+        }
+
+        function buildStreetLights(parent) {
+            const poleMat = getMat(0x34495e);
+            const bulbMat = getMat(0xffeaa7, true, 0xfdcb6e);
+
+            ROAD_COORDS.forEach(rc => {
+                [-40, 40].forEach(pos => {
+                    const lx = rc + ROAD_WIDTH / 2 + 1.2;
+                    const lz = pos;
+
+                    const lamp = new THREE.Group();
+                    lamp.position.set(lx, 0, lz);
+
+                    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 6.5, 6), poleMat);
+                    pole.position.y = 3.25;
+                    pole.castShadow = true;
+                    lamp.add(pole);
+
+                    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.15, 0.15), poleMat);
+                    arm.position.set(-0.75, 6.4, 0);
+                    lamp.add(arm);
+
+                    const bulb = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.25, 0.35), bulbMat);
+                    bulb.position.set(-1.4, 6.25, 0);
+                    lamp.add(bulb);
+
+                    parent.add(lamp);
+                    circleColliders.push({ x: lx, z: lz, r: 0.45 });
+                });
+            });
+        }
+
+        // ================= ПЕРСОНАЖ ИГРОКА (LOW-POLY) =================
+        function createCharacterMesh(shirtColor, pantsColor, skinColor = 0xffccaa) {
+            const root = new THREE.Group();
+
+            // Таз / Торс
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.05, 0.45), getMat(shirtColor));
+            torso.position.y = 1.45;
+            torso.castShadow = true;
+            root.add(torso);
+
+            // Голова
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.58, 0.58), getMat(skinColor));
+            head.position.y = 2.32;
+            head.castShadow = true;
+            root.add(head);
+
+            // Прическа / Кепка
+            const hair = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.22, 0.62), getMat(0x2d3436));
+            hair.position.y = 2.62;
+            root.add(hair);
+
+            // Руки (с точкой вращения в плече)
+            const armGeo = new THREE.BoxGeometry(0.28, 0.85, 0.28);
+            const leftArmPivot = new THREE.Group();
+            leftArmPivot.position.set(-0.58, 1.9, 0);
+            const leftArm = new THREE.Mesh(armGeo, getMat(skinColor));
+            leftArm.position.y = -0.35;
+            leftArm.castShadow = true;
+            leftArmPivot.add(leftArm);
+            root.add(leftArmPivot);
+
+            const rightArmPivot = new THREE.Group();
+            rightArmPivot.position.set(0.58, 1.9, 0);
+            const rightArm = new THREE.Mesh(armGeo, getMat(skinColor));
+            rightArm.position.y = -0.35;
+            rightArm.castShadow = true;
+            rightArmPivot.add(rightArm);
+            root.add(rightArmPivot);
+
+            // Ноги (с точкой вращения в бедре)
+            const legGeo = new THREE.BoxGeometry(0.34, 0.92, 0.34);
+            const leftLegPivot = new THREE.Group();
+            leftLegPivot.position.set(-0.23, 0.92, 0);
+            const leftLeg = new THREE.Mesh(legGeo, getMat(pantsColor));
+            leftLeg.position.y = -0.45;
+            leftLeg.castShadow = true;
+            leftLegPivot.add(leftLeg);
+            root.add(leftLegPivot);
+
+            const rightLegPivot = new THREE.Group();
+            rightLegPivot.position.set(0.23, 0.92, 0);
+            const rightLeg = new THREE.Mesh(legGeo, getMat(pantsColor));
+            rightLeg.position.y = -0.45;
+            rightLeg.castShadow = true;
+            rightLegPivot.add(rightLeg);
+            root.add(rightLegPivot);
+
+            return {
+                mesh: root,
+                leftArm: leftArmPivot,
+                rightArm: rightArmPivot,
+                leftLeg: leftLegPivot,
+                rightLeg: rightLegPivot
+            };
+        }
+
+        const playerObj = createCharacterMesh(0x00cec9, 0x2d3436);
+        const player = {
+            ...playerObj,
+            pos: new THREE.Vector3(-12, 0, -12), // Старт возле центрального парка
+            vel: new THREE.Vector3(0, 0, 0),
+            rotY: 0,
+            radius: 0.65,
+            grounded: true,
+            walkCycle: 0
+        };
+        player.mesh.position.copy(player.pos);
+        scene.add(player.mesh);
+
+        // ================= ТРАНСПОРТ (4 ТИПА + ТРАФИК) =================
+        function createVehicle(config) {
+            const carGroup = new THREE.Group();
+            const { name, type, color, x, z, rotY, isTraffic, route } = config;
+
+            const bodyMat = getMat(color);
+            const glassMat = getMat(0x2c3e50);
+            const wheelMat = getMat(0x1e272e);
+            const rimMat = getMat(0xdfe6e9);
+            const headLightMat = getMat(0xffffff, true, 0xfff200);
+            const tailLightMat = getMat(0xff3f34, true, 0xff0000);
+
+            let width = 2.2, height = 1.4, length = 4.4;
+            let cabinLen = 2.2, cabinOffset = -0.2, cabinH = 0.65;
+
+            if (type === 'suv') {
+                width = 2.4; height = 1.75; length = 4.6;
+                cabinLen = 3.0; cabinOffset = -0.4; cabinH = 0.8;
+            } else if (type === 'sport') {
+                width = 2.25; height = 1.25; length = 4.5;
+                cabinLen = 1.9; cabinOffset = -0.15; cabinH = 0.55;
+            } else if (type === 'muscle') {
+                width = 2.25; height = 1.35; length = 4.7;
+                cabinLen = 2.1; cabinOffset = -0.25; cabinH = 0.6;
+            }
+
+            // Нижний кузов
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(width, height * 0.55, length), bodyMat);
+            chassis.position.y = 0.68;
+            chassis.castShadow = true;
+            chassis.receiveShadow = true;
+            carGroup.add(chassis);
+
+            // Кабина
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(width * 0.86, cabinH, cabinLen), bodyMat);
+            cabin.position.set(0, 0.68 + height * 0.275 + cabinH / 2 - 0.05, cabinOffset);
+            cabin.castShadow = true;
+            carGroup.add(cabin);
+
+            // Лобовое и заднее стекло
+            const windshield = new THREE.Mesh(new THREE.BoxGeometry(width * 0.88, cabinH * 0.78, cabinLen * 1.03), glassMat);
+            windshield.position.copy(cabin.position);
+            carGroup.add(windshield);
+
+            // Шашечки для такси
+            if (type === 'taxi') {
+                const taxiSign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.25, 0.35), getMat(0xf1c40f, true, 0xf39c12));
+                taxiSign.position.set(0, cabin.position.y + cabinH / 2 + 0.12, cabinOffset);
+                carGroup.add(taxiSign);
+            }
+
+            // Спойлер для спорткара
+            if (type === 'sport') {
+                const spoiler = new THREE.Mesh(new THREE.BoxGeometry(width * 0.92, 0.12, 0.35), getMat(0x2d3436));
+                spoiler.position.set(0, 1.25, -length / 2 + 0.25);
+                carGroup.add(spoiler);
+            }
+
+            // Фары передние и задние
+            [-width * 0.32, width * 0.32].forEach(lx => {
+                const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.1), headLightMat);
+                hl.position.set(lx, 0.72, length / 2 + 0.02);
+                carGroup.add(hl);
+
+                const tl = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.22, 0.1), tailLightMat);
+                tl.position.set(lx, 0.74, -length / 2 - 0.02);
+                carGroup.add(tl);
+            });
+
+            // 4 колеса (передние в pivot-группах для поворота руля)
+            const wheels = [];
+            const frontWheelPivots = [];
+            const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 12);
+            wheelGeo.rotateZ(Math.PI / 2);
+            const rimGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.36, 8);
+            rimGeo.rotateZ(Math.PI / 2);
+
+            const wheelPositions = [
+                { x: -width / 2 - 0.05, z: length * 0.31, front: true },
+                { x:  width / 2 + 0.05, z: length * 0.31, front: true },
+                { x: -width / 2 - 0.05, z: -length * 0.31, front: false },
+                { x:  width / 2 + 0.05, z: -length * 0.31, front: false }
+            ];
+
+            wheelPositions.forEach(wp => {
+                const pivot = new THREE.Group();
+                pivot.position.set(wp.x, 0.42, wp.z);
+
+                const wMesh = new THREE.Mesh(wheelGeo, wheelMat);
+                wMesh.castShadow = true;
+                const rMesh = new THREE.Mesh(rimGeo, rimMat);
+                wMesh.add(rMesh);
+
+                pivot.add(wMesh);
+                carGroup.add(pivot);
+                wheels.push(wMesh);
+                if (wp.front) frontWheelPivots.push(pivot);
+            });
+
+            carGroup.position.set(x, 0, z);
+            carGroup.rotation.y = rotY;
+            scene.add(carGroup);
+
+            const veh = {
+                name: name,
+                type: type,
+                color: '#' + color.toString(16).padStart(6, '0'),
+                mesh: carGroup,
+                wheels: wheels,
+                frontPivots: frontWheelPivots,
+                pos: new THREE.Vector3(x, 0, z),
+                rotY: rotY,
+                speed: 0,
+                steerAngle: 0,
+                maxSpeed: type === 'sport' ? 38 : (type === 'muscle' ? 34 : (type === 'suv' ? 28 : 30)),
+                accel: type === 'sport' ? 26 : 21,
+                radius: 2.1,
+                isPlayerControlled: false,
+                isTraffic: isTraffic || false,
+                route: route || null,
+                waypointIdx: 0
+            };
+
+            vehicles.push(veh);
+            return veh;
+        }
+
+        function initVehicles() {
+            // 4 припаркованные машины в разных точках города
+            createVehicle({ name: 'INFERNUS GT', type: 'sport', color: 0xff3f34, x: -6, z: -11, rotY: Math.PI / 2 });
+            createVehicle({ name: 'VICE CAB', type: 'taxi', color: 0xffdd59, x: 6, z: 12, rotY: 0 });
+            createVehicle({ name: 'STALLION V8', type: 'muscle', color: 0x3c40c6, x: 74, z: -25, rotY: 0 });
+            createVehicle({ name: 'PATRIOT 4X4', type: 'suv', color: 0x05c46b, x: -74, z: 32, rotY: Math.PI });
+
+            // 3 машины ИИ-трафика, курсирующие по кольцевым маршрутам дорог (по правой полосе!)
+            const lane = 3.8; // Смещение на правую полосу движения
+
+            // Маршрут 1: Внутренний квадрат вокруг центра города (по часовой стрелке)
+            const route1 = [
+                new THREE.Vector3(-80 - lane, 0, -80 - lane),
+                new THREE.Vector3(80 - lane, 0, -80 - lane),
+                new THREE.Vector3(80 - lane, 0, 80 - lane),
+                new THREE.Vector3(-80 - lane, 0, 80 - lane)
+            ];
+            const t1 = createVehicle({
+                name: 'ADMIRAL SEDAN', type: 'sedan', color: 0xecf0f1,
+                x: route1[0].x, z: route1[0].z, rotY: Math.PI / 2,
+                isTraffic: true, route: route1
+            });
+            t1.waypointIdx = 1;
+
+            // Маршрут 2: Средний прямоугольник (против часовой стрелки)
+            const route2 = [
+                new THREE.Vector3(lane, 0, 80 + lane),
+                new THREE.Vector3(80 + lane, 0, 80 + lane),
+                new THREE.Vector3(80 + lane, 0, -lane),
+                new THREE.Vector3(lane, 0, -lane)
+            ];
+            const t2 = createVehicle({
+                name: 'SENTINEL COUPE', type: 'muscle', color: 0x9b59b6,
+                x: route2[0].x, z: route2[0].z, rotY: Math.PI / 2,
+                isTraffic: true, route: route2
+            });
+            t2.waypointIdx = 1;
+
+            // Маршрут 3: Городское такси на длинном проспекте
+            const route3 = [
+                new THREE.Vector3(-80 + lane, 0, lane),
+                new THREE.Vector3(-80 + lane, 0, -80 + lane),
+                new THREE.Vector3(-lane, 0, -80 + lane),
+                new THREE.Vector3(-lane, 0, lane)
+            ];
+            const t3 = createVehicle({
+                name: 'CITY TAXI', type: 'taxi', color: 0xf1c40f,
+                x: route3[0].x, z: route3[0].z, rotY: Math.PI,
+                isTraffic: true, route: route3
+            });
+            t3.waypointIdx = 1;
+        }
+
+        // ================= ПЕШЕХОДЫ (6 NPC НА ТРОТУАРАХ) =================
+        function initPedestrians() {
+            const npcConfigs = [
+                // Вокруг центрального парка
+                {
+                    shirt: 0xe84393, pants: 0x0984e3,
+                    waypoints: [
+                        new THREE.Vector3(-70, 0, -70),
+                        new THREE.Vector3(-10, 0, -70),
+                        new THREE.Vector3(-10, 0, -10),
+                        new THREE.Vector3(-70, 0, -10)
+                    ]
+                },
+                {
+                    shirt: 0xfdcb6e, pants: 0x2d3436,
+                    waypoints: [
+                        new THREE.Vector3(-10, 0, -10),
+                        new THREE.Vector3(-70, 0, -10),
+                        new THREE.Vector3(-70, 0, -70),
+                        new THREE.Vector3(-10, 0, -70)
+                    ]
+                },
+                // Квартал Юго-Восток
+                {
+                    shirt: 0x00b894, pants: 0x636e72,
+                    waypoints: [
+                        new THREE.Vector3(10, 0, 10),
+                        new THREE.Vector3(70, 0, 10),
+                        new THREE.Vector3(70, 0, 70),
+                        new THREE.Vector3(10, 0, 70)
+                    ]
+                },
+                // Квартал Северо-Восток
+                {
+                    shirt: 0xd63031, pants: 0x2c3e50,
+                    waypoints: [
+                        new THREE.Vector3(10, 0, -70),
+                        new THREE.Vector3(70, 0, -70),
+                        new THREE.Vector3(70, 0, -10),
+                        new THREE.Vector3(10, 0, -10)
+                    ]
+                },
+                // Квартал Юго-Запад
+                {
+                    shirt: 0x6c5ce7, pants: 0xdfe6e9,
+                    waypoints: [
+                        new THREE.Vector3(-70, 0, 10),
+                        new THREE.Vector3(-10, 0, 10),
+                        new THREE.Vector3(-10, 0, 70),
+                        new THREE.Vector3(-70, 0, 70)
+                    ]
+                },
+                // Прогулка по аллее парка
+                {
+                    shirt: 0xff7675, pants: 0x2d3436,
+                    waypoints: [
+                        new THREE.Vector3(-62, 0, -40),
+                        new THREE.Vector3(-47, 0, -40),
+                        new THREE.Vector3(-40, 0, -47),
+                        new THREE.Vector3(-40, 0, -62),
+                        new THREE.Vector3(-40, 0, -47),
+                        new THREE.Vector3(-47, 0, -40)
+                    ]
+                }
+            ];
+
+            npcConfigs.forEach(cfg => {
+                const charObj = createCharacterMesh(cfg.shirt, cfg.pants);
+                const start = cfg.waypoints[0];
+                charObj.mesh.position.copy(start);
+                scene.add(charObj.mesh);
+
+                pedestrians.push({
+                    ...charObj,
+                    pos: start.clone(),
+                    rotY: 0,
+                    waypoints: cfg.waypoints,
+                    wpIdx: 1,
+                    speed: 2.6 + Math.random() * 0.8,
+                    walkCycle: Math.random() * 6
+                });
+            });
+        }
+
+        // ================= ПОДБИРАЕМЫЕ ПАЧКИ ДЕНЕГ =================
+        function initMoneyPickups() {
+            const spots = [
+                [-40, -48], [-32, -40], // В парке у фонтана
+                [40, 40], [40, -40], [-40, 40],
+                [-104, -40], [104, 40], [0, -104], [0, 104]
+            ];
+
+            const bundleGeo = new THREE.BoxGeometry(0.9, 0.35, 0.55);
+            const bundleMat = getMat(0x2ecc71, true, 0x10ac84);
+            const bandGeo = new THREE.BoxGeometry(0.25, 0.38, 0.58);
+            const bandMat = getMat(0xf1c40f);
+
+            spots.forEach(([x, z]) => {
+                const group = new THREE.Group();
+                const bundle = new THREE.Mesh(bundleGeo, bundleMat);
+                const band = new THREE.Mesh(bandGeo, bandMat);
+                group.add(bundle, band);
+                group.position.set(x, 0.85, z);
+                scene.add(group);
+
+                moneyPickups.push({
+                    mesh: group,
+                    pos: new THREE.Vector3(x, 0.85, z),
+                    amount: 500,
+                    active: true,
+                    respawnTimer: 0
+                });
+            });
+        }
+
+        // ================= ФИЗИКА И КОЛЛИЗИИ (SLIDING COLLISION) =================
+        function resolveCollisions(pos, radius) {
+            // 1. AABB здания и границы карты
+            for (let i = 0; i < colliders.length; i++) {
+                const box = colliders[i];
+                const closestX = Math.max(box.minX, Math.min(pos.x, box.maxX));
+                const closestZ = Math.max(box.minZ, Math.min(pos.z, box.maxZ));
+
+                const dx = pos.x - closestX;
+                const dz = pos.z - closestZ;
+                const distSq = dx * dx + dz * dz;
+
+                if (distSq < radius * radius) {
+                    const dist = Math.sqrt(distSq);
+                    if (dist > 0.0001) {
+                        const overlap = radius - dist;
+                        pos.x += (dx / dist) * overlap;
+                        pos.z += (dz / dist) * overlap;
+                    } else {
+                        pos.x += radius;
+                    }
+                }
+            }
+
+            // 2. Круговые препятствия (деревья, фонари, фонтан)
+            for (let i = 0; i < circleColliders.length; i++) {
+                const c = circleColliders[i];
+                const dx = pos.x - c.x;
+                const dz = pos.z - c.z;
+                const minDist = radius + c.r;
+                const distSq = dx * dx + dz * dz;
+
+                if (distSq < minDist * minDist) {
+                    const dist = Math.sqrt(distSq) || 0.001;
+                    const overlap = minDist - dist;
+                    pos.x += (dx / dist) * overlap;
+                    pos.z += (dz / dist) * overlap;
+                }
+            }
+        }
+
+        // ================= УПРАВЛЕНИЕ ИГРОКОМ, АВТО И ИИ =================
+        function getCombinedInput() {
+            let moveX = input.joyX;
+            let moveY = input.joyY;
+
+            if (input.keys['KeyA'] || input.keys['ArrowLeft']) moveX -= 1;
+            if (input.keys['KeyD'] || input.keys['ArrowRight']) moveX += 1;
+            if (input.keys['KeyW'] || input.keys['ArrowUp']) moveY -= 1;
+            if (input.keys['KeyS'] || input.keys['ArrowDown']) moveY += 1;
+
+            const len = Math.hypot(moveX, moveY);
+            if (len > 1) {
+                moveX /= len;
+                moveY /= len;
+            }
+
+            const jump = input.jump || input.keys['Space'];
+            const gas = input.gas || input.keys['KeyW'] || input.keys['ArrowUp'];
+            const brake = input.brake || input.keys['KeyS'] || input.keys['ArrowDown'] || input.keys['Space'];
+
+            return { moveX, moveY, jump, gas, brake };
+        }
+
+        function updatePlayerOnFoot(dt) {
+            const ctrl = getCombinedInput();
+            const moveSpeed = 10.5;
+
+            // Вектор движения относительно угла обзора камеры
+            const inputMag = Math.hypot(ctrl.moveX, ctrl.moveY);
+            if (inputMag > 0.05) {
+                const camForwardX = -Math.sin(state.cameraYaw);
+                const camForwardZ = -Math.cos(state.cameraYaw);
+                const camRightX = Math.cos(state.cameraYaw);
+                const camRightZ = -Math.sin(state.cameraYaw);
+
+                const dirX = camForwardX * (-ctrl.moveY) + camRightX * ctrl.moveX;
+                const dirZ = camForwardZ * (-ctrl.moveY) + camRightZ * ctrl.moveX;
+
+                player.vel.x = dirX * moveSpeed;
+                player.vel.z = dirZ * moveSpeed;
+
+                // Плавный поворот персонажа в сторону бега
+                const targetRot = Math.atan2(dirX, dirZ);
+                let diff = targetRot - player.rotY;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                player.rotY += diff * Math.min(1, dt * 14);
+            } else {
+                player.vel.x *= Math.pow(0.001, dt);
+                player.vel.z *= Math.pow(0.001, dt);
+            }
+
+            // Прыжок и гравитация
+            if (ctrl.jump && player.grounded) {
+                player.vel.y = 9.2;
+                player.grounded = false;
+            }
+            player.vel.y -= 24.0 * dt;
+
+            player.pos.x += player.vel.x * dt;
+            player.pos.z += player.vel.z * dt;
+            player.pos.y += player.vel.y * dt;
+
+            if (player.pos.y <= 0) {
+                player.pos.y = 0;
+                player.vel.y = 0;
+                player.grounded = true;
+            }
+
+            // Коллизии со зданиями и припаркованными машинами
+            resolveCollisions(player.pos, player.radius);
+            vehicles.forEach(v => {
+                const dx = player.pos.x - v.pos.x;
+                const dz = player.pos.z - v.pos.z;
+                const minDist = player.radius + v.radius * 0.85;
+                const dSq = dx * dx + dz * dz;
+                if (dSq < minDist * minDist) {
+                    const d = Math.sqrt(dSq) || 0.01;
+                    player.pos.x += (dx / d) * (minDist - d);
+                    player.pos.z += (dz / d) * (minDist - d);
+                }
+            });
+
+            player.mesh.position.copy(player.pos);
+            player.mesh.rotation.y = player.rotY;
+
+            // Процедурная анимация рук и ног
+            const horizSpeed = Math.hypot(player.vel.x, player.vel.z);
+            if (!player.grounded) {
+                player.leftLeg.rotation.x = -0.45;
+                player.rightLeg.rotation.x = 0.35;
+                player.leftArm.rotation.x = -0.8;
+                player.rightArm.rotation.x = -0.8;
+            } else if (horizSpeed > 0.5) {
+                player.walkCycle += dt * horizSpeed * 1.35;
+                const swing = Math.sin(player.walkCycle) * 0.75;
+                player.leftLeg.rotation.x = swing;
+                player.rightLeg.rotation.x = -swing;
+                player.leftArm.rotation.x = -swing * 0.8;
+                player.rightArm.rotation.x = swing * 0.8;
+            } else {
+                player.leftLeg.rotation.x *= 0.8;
+                player.rightLeg.rotation.x *= 0.8;
+                player.leftArm.rotation.x *= 0.8;
+                player.rightArm.rotation.x *= 0.8;
+            }
+
+            // Поиск ближайшей машины для кнопки "Сесть в авто"
+            let closest = null;
+            let closestDist = 4.6;
+            vehicles.forEach(v => {
+                const d = player.pos.distanceTo(v.pos);
+                if (d < closestDist) {
+                    closestDist = d;
+                    closest = v;
+                }
+            });
+            state.nearestVehicle = closest;
+            const enterBtn = document.getElementById('btn-enter-car');
+            enterBtn.style.display = closest ? 'flex' : 'none';
+        }
+
+        function enterVehicle(veh) {
+            if (!veh) return;
+            state.mode = 'incar';
+            state.currentVehicle = veh;
+            veh.isPlayerControlled = true;
+            veh.isTraffic = false; // Игрок перехватывает управление даже у машины трафика!
+
+            player.mesh.visible = false;
+
+            document.getElementById('onfoot-controls').classList.add('hidden');
+            document.getElementById('incar-controls').classList.remove('hidden');
+            document.getElementById('speedometer').style.display = 'block';
+
+            // Показываем название авто в стиле GTA
+            const toast = document.getElementById('vehicle-name-toast');
+            toast.textContent = veh.name;
+            toast.classList.add('visible');
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => toast.classList.remove('visible'), 2500);
+        }
+
+        function exitVehicle() {
+            const veh = state.currentVehicle;
+            if (!veh) return;
+
+            veh.isPlayerControlled = false;
+            state.mode = 'onfoot';
+            state.currentVehicle = null;
+
+            // Высаживаем игрока слева от водительской двери
+            const leftX = Math.cos(veh.rotY) * 2.3;
+            const leftZ = -Math.sin(veh.rotY) * 2.3;
+            player.pos.set(veh.pos.x + leftX, 0, veh.pos.z + leftZ);
+            resolveCollisions(player.pos, player.radius);
+
+            player.vel.set(0, 0, 0);
+            player.rotY = veh.rotY;
+            player.mesh.position.copy(player.pos);
+            player.mesh.visible = true;
+
+            document.getElementById('incar-controls').classList.add('hidden');
+            document.getElementById('onfoot-controls').classList.remove('hidden');
+            document.getElementById('speedometer').style.display = 'none';
+        }
+
+        function updateVehicles(dt) {
+            const ctrl = getCombinedInput();
+
+            vehicles.forEach(v => {
+                if (v.isPlayerControlled) {
+                    // --- АРКАДНАЯ ФИЗИКА ВОЖДЕНИЯ ИГРОКА ---
+                    if (ctrl.gas) {
+                        v.speed += v.accel * dt;
+                    } else if (ctrl.brake) {
+                        if (v.speed > 1.0) {
+                            v.speed -= v.accel * 1.6 * dt; // Активное торможение
+                        } else {
+                            v.speed -= v.accel * 0.65 * dt; // Задний ход
+                        }
+                    } else {
+                        // Естественное трение качения
+                        v.speed *= Math.pow(0.28, dt);
+                        if (Math.abs(v.speed) < 0.1) v.speed = 0;
+                    }
+
+                    v.speed = Math.max(-v.maxSpeed * 0.45, Math.min(v.maxSpeed, v.speed));
+
+                    // Поворот руля (плавный отклик от стика)
+                    const targetSteer = -ctrl.moveX * 0.55;
+                    v.steerAngle += (targetSteer - v.steerAngle) * Math.min(1, dt * 10);
+
+                    // Поворот кузова зависит от скорости и направления движения
+                    if (Math.abs(v.speed) > 0.3) {
+                        const speedFactor = Math.min(1, Math.abs(v.speed) / 8);
+                        const reverseSign = v.speed >= 0 ? 1 : -1;
+                        v.rotY += v.steerAngle * 2.6 * speedFactor * reverseSign * dt;
+                    }
+
+                    // Синхронизируем камеру мягко за машиной, если пользователь не крутит ее пальцем
+                    if (!cameraTouchActive && Math.abs(v.speed) > 2.0) {
+                        const desiredCamYaw = v.rotY + Math.PI;
+                        let diff = desiredCamYaw - state.cameraYaw;
+                        while (diff > Math.PI) diff -= Math.PI * 2;
+                        while (diff < -Math.PI) diff += Math.PI * 2;
+                        state.cameraYaw += diff * Math.min(1, dt * 2.2);
+                    }
+
+                    // Спидометр (переводим единицы/сек в реалистичные км/ч)
+                    const kmh = Math.round(Math.abs(v.speed) * 4.2);
+                    document.getElementById('speed-value').textContent = kmh;
+
+                } else if (v.isTraffic && v.route) {
+                    // --- ИИ ТРАФИКА ПО WAYPOINTS ---
+                    const target = v.route[v.waypointIdx];
+                    const dx = target.x - v.pos.x;
+                    const dz = target.z - v.pos.z;
+                    const distToWp = Math.hypot(dx, dz);
+
+                    if (distToWp < 4.5) {
+                        v.waypointIdx = (v.waypointIdx + 1) % v.route.length;
+                    }
+
+                    const desiredRot = Math.atan2(dx, dz);
+                    let angleDiff = desiredRot - v.rotY;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+                    v.steerAngle = Math.max(-0.5, Math.min(0.5, angleDiff));
+                    v.rotY += angleDiff * Math.min(1, dt * 4.5);
+
+                    // Проверка препятствий впереди (игрок, пешеходы, другие машины)
+                    let obstacleAhead = false;
+                    const fwdX = Math.sin(v.rotY);
+                    const fwdZ = Math.cos(v.rotY);
+
+                    // Проверка игрока пешком
+                    if (state.mode === 'onfoot') {
+                        const px = player.pos.x - v.pos.x;
+                        const pz = player.pos.z - v.pos.z;
+                        const dot = px * fwdX + pz * fwdZ;
+                        const side = Math.abs(px * fwdZ - pz * fwdX);
+                        if (dot > 0 && dot < 11 && side < 2.6) obstacleAhead = true;
+                    }
+
+                    // Проверка других машин
+                    for (let j = 0; j < vehicles.length; j++) {
+                        const other = vehicles[j];
+                        if (other === v) continue;
+                        const ox = other.pos.x - v.pos.x;
+                        const oz = other.pos.z - v.pos.z;
+                        const dot = ox * fwdX + oz * fwdZ;
+                        const side = Math.abs(ox * fwdZ - oz * fwdX);
+                        if (dot > 0 && dot < 10.5 && side < 2.6) {
+                            obstacleAhead = true;
+                            break;
+                        }
+                    }
+
+                    // Проверка пешеходов
+                    if (!obstacleAhead) {
+                        for (let j = 0; j < pedestrians.length; j++) {
+                            const ped = pedestrians[j];
+                            const px = ped.pos.x - v.pos.x;
+                            const pz = ped.pos.z - v.pos.z;
+                            const dot = px * fwdX + pz * fwdZ;
+                            const side = Math.abs(px * fwdZ - pz * fwdX);
+                            if (dot > 0 && dot < 9.5 && side < 2.4) {
+                                obstacleAhead = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    const targetTrafficSpeed = obstacleAhead ? 0 : (Math.abs(angleDiff) > 0.35 ? 8.5 : 13.5);
+                    v.speed += (targetTrafficSpeed - v.speed) * Math.min(1, dt * (obstacleAhead ? 8 : 3));
+                } else {
+                    // Припаркованная машина гасит инерцию после удара
+                    v.speed *= Math.pow(0.05, dt);
+                    v.steerAngle *= 0.85;
+                }
+
+                // Перемещение автомобиля
+                const moveX = Math.sin(v.rotY) * v.speed * dt;
+                const moveZ = Math.cos(v.rotY) * v.speed * dt;
+                v.pos.x += moveX;
+                v.pos.z += moveZ;
+
+                // Коллизии со зданиями и деревьями (с потерей скорости при ударе)
+                const beforeX = v.pos.x;
+                const beforeZ = v.pos.z;
+                resolveCollisions(v.pos, v.radius);
+                if (Math.hypot(v.pos.x - beforeX, v.pos.z - beforeZ) > 0.02) {
+                    v.speed *= 0.72;
+                }
+
+                // Вращение и поворот колес
+                v.frontPivots.forEach(p => p.rotation.y = v.steerAngle);
+                v.wheels.forEach(w => w.rotation.x += v.speed * dt * 2.2);
+
+                // Легкий крен кузова при повороте на скорости
+                const bodyRoll = -v.steerAngle * (v.speed / v.maxSpeed) * 0.08;
+                v.mesh.rotation.z = bodyRoll;
+                v.mesh.rotation.y = v.rotY;
+                v.mesh.position.copy(v.pos);
+
+                // Привязываем координаты игрока к машине, если он внутри
+                if (v.isPlayerControlled) {
+                    player.pos.copy(v.pos);
+                }
+            });
+
+            // Столкновения машин между собой (упругое расталкивание)
+            for (let i = 0; i < vehicles.length; i++) {
+                for (let j = i + 1; j < vehicles.length; j++) {
+                    const a = vehicles[i];
+                    const b = vehicles[j];
+                    const dx = b.pos.x - a.pos.x;
+                    const dz = b.pos.z - a.pos.z;
+                    const minDist = a.radius + b.radius;
+                    const dSq = dx * dx + dz * dz;
+                    if (dSq < minDist * minDist && dSq > 0.0001) {
+                        const d = Math.sqrt(dSq);
+                        const overlap = (minDist - d) * 0.5;
+                        const nx = dx / d;
+                        const nz = dz / d;
+                        a.pos.x -= nx * overlap;
+                        a.pos.z -= nz * overlap;
+                        b.pos.x += nx * overlap;
+                        b.pos.z += nz * overlap;
+                        a.speed *= 0.75;
+                        b.speed *= 0.75;
+                    }
+                }
+            }
+        }
+
+        function updatePedestrians(dt) {
+            pedestrians.forEach(ped => {
+                const target = ped.waypoints[ped.wpIdx];
+                const dx = target.x - ped.pos.x;
+                const dz = target.z - ped.pos.z;
+                const dist = Math.hypot(dx, dz);
+
+                if (dist < 1.2) {
+                    ped.wpIdx = (ped.wpIdx + 1) % ped.waypoints.length;
+                }
+
+                const dirX = dx / (dist || 1);
+                const dirZ = dz / (dist || 1);
+
+                // Проверка препятствий перед пешеходом (машины или игрок)
+                let blocked = false;
+                for (let i = 0; i < vehicles.length; i++) {
+                    const v = vehicles[i];
+                    const vx = v.pos.x - ped.pos.x;
+                    const vz = v.pos.z - ped.pos.z;
+                    const dot = vx * dirX + vz * dirZ;
+                    const side = Math.abs(vx * dirZ - vz * dirX);
+                    if (dot > 0 && dot < 4.5 && side < 2.2) {
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                if (!blocked) {
+                    ped.pos.x += dirX * ped.speed * dt;
+                    ped.pos.z += dirZ * ped.speed * dt;
+                    resolveCollisions(ped.pos, 0.55);
+
+                    const targetRot = Math.atan2(dirX, dirZ);
+                    let diff = targetRot - ped.rotY;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    ped.rotY += diff * Math.min(1, dt * 8);
+
+                    ped.walkCycle += dt * ped.speed * 2.2;
+                    const swing = Math.sin(ped.walkCycle) * 0.65;
+                    ped.leftLeg.rotation.x = swing;
+                    ped.rightLeg.rotation.x = -swing;
+                    ped.leftArm.rotation.x = -swing * 0.7;
+                    ped.rightArm.rotation.x = swing * 0.7;
+                } else {
+                    ped.leftLeg.rotation.x *= 0.8;
+                    ped.rightLeg.rotation.x *= 0.8;
+                    ped.leftArm.rotation.x *= 0.8;
+                    ped.rightArm.rotation.x *= 0.8;
+                }
+
+                ped.mesh.position.copy(ped.pos);
+                ped.mesh.rotation.y = ped.rotY;
+            });
+        }
+
+        function updatePickups(dt, elapsed) {
+            const moneyEl = document.getElementById('money-display');
+
+            moneyPickups.forEach(p => {
+                if (!p.active) {
+                    p.respawnTimer -= dt;
+                    if (p.respawnTimer <= 0) {
+                        p.active = true;
+                        p.mesh.visible = true;
+                    }
+                    return;
+                }
+
+                p.mesh.rotation.y = elapsed * 2.5;
+                p.mesh.position.y = 0.85 + Math.sin(elapsed * 4) * 0.15;
+
+                // Подбор игроком (пешком или на авто)
+                const collectDist = state.mode === 'incar' ? 3.2 : 1.8;
+                if (player.pos.distanceTo(p.pos) < collectDist) {
+                    p.active = false;
+                    p.mesh.visible = false;
+                    p.respawnTimer = 25; // Появится снова через 25 сек
+
+                    state.money += p.amount;
+                    moneyEl.textContent = '$' + String(state.money).padStart(8, '0');
+                    moneyEl.classList.add('pop');
+                    setTimeout(() => moneyEl.classList.remove('pop'), 220);
+                }
+            });
+        }
+
+        // ================= КАМЕРА ОТ ТРЕТЬЕГО ЛИЦА =================
+        function updateCamera(dt) {
+            const targetPos = state.mode === 'incar' && state.currentVehicle
+                ? state.currentVehicle.pos
+                : player.pos;
+
+            const desiredDist = state.mode === 'incar' ? 11.5 : 8.2;
+            state.cameraDist += (desiredDist - state.cameraDist) * Math.min(1, dt * 5);
+
+            const lookAtPoint = new THREE.Vector3(
+                targetPos.x,
+                targetPos.y + (state.mode === 'incar' ? 1.8 : 2.1),
+                targetPos.z
+            );
+
+            const horizDist = Math.cos(state.cameraPitch) * state.cameraDist;
+            const vertDist = Math.sin(state.cameraPitch) * state.cameraDist;
+
+            const desiredCamPos = new THREE.Vector3(
+                lookAtPoint.x + Math.sin(state.cameraYaw) * horizDist,
+                lookAtPoint.y + vertDist,
+                lookAtPoint.z + Math.cos(state.cameraYaw) * horizDist
+            );
+
+            // Ограничение высоты камеры над землей и защита от залета за границы карты
+            desiredCamPos.y = Math.max(1.4, desiredCamPos.y);
+            desiredCamPos.x = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, desiredCamPos.x));
+            desiredCamPos.z = Math.max(-HALF_WORLD + 2, Math.min(HALF_WORLD - 2, desiredCamPos.z));
+
+            camera.position.lerp(desiredCamPos, Math.min(1, dt * 12));
+            camera.lookAt(lookAtPoint);
+
+            // Перемещаем центр теневой камеры за игроком (60 FPS оптимизация!)
+            dirLight.position.set(targetPos.x + 45, 75, targetPos.z + 35);
+            dirLight.target.position.set(targetPos.x, 0, targetPos.z);
+            dirLight.target.updateMatrixWorld();
+        }
+
+        // ================= 2D МИНИ-КАРТА (CANVAS) =================
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        const mmCtx = minimapCanvas.getContext('2d');
+
+        function renderMinimap() {
+            const w = minimapCanvas.width;
+            const h = minimapCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const scale = 0.72; // Масштаб мира на радаре
+
+            mmCtx.clearRect(0, 0, w, h);
+
+            // Фон радара
+            mmCtx.fillStyle = '#2d3436';
+            mmCtx.fillRect(0, 0, w, h);
+
+            mmCtx.save();
+            mmCtx.translate(cx, cy);
+
+            const px = player.pos.x;
+            const pz = player.pos.z;
+
+            // Дороги
+            mmCtx.fillStyle = '#636e72';
+            ROAD_COORDS.forEach(rc => {
+                // Горизонтальная дорога
+                mmCtx.fillRect((-HALF_WORLD - px) * scale, (rc - ROAD_WIDTH / 2 - pz) * scale, WORLD_SIZE * scale, ROAD_WIDTH * scale);
+                // Вертикальная дорога
+                mmCtx.fillRect((rc - ROAD_WIDTH / 2 - px) * scale, (-HALF_WORLD - pz) * scale, ROAD_WIDTH * scale, WORLD_SIZE * scale);
+            });
+
+            // Здания и парк
+            buildingsData.forEach(b => {
+                mmCtx.fillStyle = b.isPark ? '#2ecc71' : '#b2bec3';
+                mmCtx.fillRect(
+                    (b.x - b.w / 2 - px) * scale,
+                    (b.z - b.d / 2 - pz) * scale,
+                    b.w * scale,
+                    b.d * scale
+                );
+            });
+
+            // Пачки денег (зеленые точки)
+            mmCtx.fillStyle = '#55efc4';
+            moneyPickups.forEach(m => {
+                if (!m.active) return;
+                mmCtx.beginPath();
+                mmCtx.arc((m.pos.x - px) * scale, (m.pos.z - pz) * scale, 2.5, 0, Math.PI * 2);
+                mmCtx.fill();
+            });
+
+            // Пешеходы (белые точки)
+            mmCtx.fillStyle = '#ffffff';
+            pedestrians.forEach(ped => {
+                mmCtx.beginPath();
+                mmCtx.arc((ped.pos.x - px) * scale, (ped.pos.z - pz) * scale, 2, 0, Math.PI * 2);
+                mmCtx.fill();
+            });
+
+            // Транспорт (цветные прямоугольники)
+            vehicles.forEach(v => {
+                if (v.isPlayerControlled) return;
+                mmCtx.save();
+                mmCtx.translate((v.pos.x - px) * scale, (v.pos.z - pz) * scale);
+                mmCtx.rotate(-v.rotY);
+                mmCtx.fillStyle = v.isTraffic ? '#feca57' : '#ff6b6b';
+                mmCtx.fillRect(-2.5, -4, 5, 8);
+                mmCtx.restore();
+            });
+
+            // Маркер игрока в центре (стрелка направления)
+            const playerYaw = state.mode === 'incar' && state.currentVehicle
+                ? state.currentVehicle.rotY
+                : player.rotY;
+
+            mmCtx.rotate(-playerYaw + Math.PI);
+            mmCtx.fillStyle = '#ffdd59';
+            mmCtx.strokeStyle = '#000000';
+            mmCtx.lineWidth = 1.5;
+            mmCtx.beginPath();
+            mmCtx.moveTo(0, -7);
+            mmCtx.lineTo(5, 6);
+            mmCtx.lineTo(0, 3);
+            mmCtx.lineTo(-5, 6);
+            mmCtx.closePath();
+            mmCtx.fill();
+            mmCtx.stroke();
+
+            mmCtx.restore();
+        }
+
+        // ================= МУЛЬТИТАЧ УПРАВЛЕНИЕ И КЛАВИАТУРА =================
+        let joyTouchId = null;
+        let cameraTouchId = null;
+        let cameraTouchActive = false;
+        let lastCamX = 0;
+        let lastCamY = 0;
+
+        const joyZone = document.getElementById('joystick-zone');
+        const joyBase = document.getElementById('joystick-base');
+        const joyKnob = document.getElementById('joystick-knob');
+        const maxJoyRadius = 42;
+
+        function updateJoystick(clientX, clientY) {
+            const rect = joyBase.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            let dx = clientX - centerX;
+            let dy = clientY - centerY;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > maxJoyRadius) {
+                dx = (dx / dist) * maxJoyRadius;
+                dy = (dy / dist) * maxJoyRadius;
+            }
+
+            joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+            input.joyX = dx / maxJoyRadius;
+            input.joyY = dy / maxJoyRadius;
+        }
+
+        function resetJoystick() {
+            joyTouchId = null;
+            joyKnob.style.transform = 'translate(0px, 0px)';
+            input.joyX = 0;
+            input.joyY = 0;
+        }
+
+        joyZone.addEventListener('touchstart', e => {
+            e.preventDefault();
+            if (joyTouchId === null && e.changedTouches.length > 0) {
+                const t = e.changedTouches[0];
+                joyTouchId = t.identifier;
+                updateJoystick(t.clientX, t.clientY);
+            }
+        }, { passive: false });
+
+        joyZone.addEventListener('touchmove', e => {
+            e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier === joyTouchId) {
+                    updateJoystick(t.clientX, t.clientY);
+                }
+            }
+        }, { passive: false });
+
+        const endJoyHandler = e => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joyTouchId) {
+                    resetJoystick();
+                }
+            }
+        };
+        joyZone.addEventListener('touchend', endJoyHandler);
+        joyZone.addEventListener('touchcancel', endJoyHandler);
+
+        // Вращение камеры свайпом пальца по экрану
+        const camZone = document.getElementById('camera-touch-zone');
+        camZone.addEventListener('touchstart', e => {
+            if (cameraTouchId === null && e.changedTouches.length > 0) {
+                const t = e.changedTouches[0];
+                cameraTouchId = t.identifier;
+                cameraTouchActive = true;
+                lastCamX = t.clientX;
+                lastCamY = t.clientY;
+            }
+        }, { passive: true });
+
+        camZone.addEventListener('touchmove', e => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier === cameraTouchId) {
+                    const dx = t.clientX - lastCamX;
+                    const dy = t.clientY - lastCamY;
+                    lastCamX = t.clientX;
+                    lastCamY = t.clientY;
+
+                    state.cameraYaw -= dx * 0.0065;
+                    state.cameraPitch = Math.max(0.12, Math.min(0.85, state.cameraPitch + dy * 0.0045));
+                }
+            }
+        }, { passive: true });
+
+        const endCamHandler = e => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === cameraTouchId) {
+                    cameraTouchId = null;
+                    cameraTouchActive = false;
+                }
+            }
+        };
+        camZone.addEventListener('touchend', endCamHandler);
+        camZone.addEventListener('touchcancel', endCamHandler);
+
+        // Вспомогательная привязка сенсорных кнопок (удержание)
+        function bindHoldButton(btnId, onDown, onUp) {
+            const btn = document.getElementById(btnId);
+            const start = e => {
+                e.preventDefault();
+                e.stopPropagation();
+                btn.classList.add('active');
+                onDown();
+            };
+            const end = e => {
+                e.preventDefault();
+                e.stopPropagation();
+                btn.classList.remove('active');
+                onUp();
+            };
+            btn.addEventListener('touchstart', start, { passive: false });
+            btn.addEventListener('touchend', end, { passive: false });
+            btn.addEventListener('touchcancel', end, { passive: false });
+            btn.addEventListener('mousedown', start);
+            btn.addEventListener('mouseup', end);
+            btn.addEventListener('mouseleave', end);
+        }
+
+        bindHoldButton('btn-jump', () => { input.jump = true; }, () => { input.jump = false; });
+        bindHoldButton('btn-gas', () => { input.gas = true; }, () => { input.gas = false; });
+        bindHoldButton('btn-brake', () => { input.brake = true; }, () => { input.brake = false; });
+
+        // Кнопки посадки / выхода из авто
+        function bindTapButton(btnId, action) {
+            const btn = document.getElementById(btnId);
+            btn.addEventListener('touchstart', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                action();
+            }, { passive: false });
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                action();
+            });
+        }
+
+        bindTapButton('btn-enter-car', () => {
+            if (state.mode === 'onfoot' && state.nearestVehicle) {
+                enterVehicle(state.nearestVehicle);
+            }
+        });
+
+        bindTapButton('btn-exit-car', () => {
+            if (state.mode === 'incar') {
+                exitVehicle();
+            }
+        });
+
+        // Клавиатура и мышь (для удобства проверки на ПК)
+        window.addEventListener('keydown', e => {
+            input.keys[e.code] = true;
+            if (e.code === 'KeyF' || e.code === 'KeyE') {
+                if (state.mode === 'onfoot' && state.nearestVehicle) {
+                    enterVehicle(state.nearestVehicle);
+                } else if (state.mode === 'incar') {
+                    exitVehicle();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', e => {
+            input.keys[e.code] = false;
+        });
+
+        let mouseDragging = false;
+        camZone.addEventListener('mousedown', e => {
+            mouseDragging = true;
+            cameraTouchActive = true;
+            lastCamX = e.clientX;
+            lastCamY = e.clientY;
+        });
+        window.addEventListener('mousemove', e => {
+            if (!mouseDragging) return;
+            const dx = e.clientX - lastCamX;
+            const dy = e.clientY - lastCamY;
+            lastCamX = e.clientX;
+            lastCamY = e.clientY;
+            state.cameraYaw -= dx * 0.005;
+            state.cameraPitch = Math.max(0.12, Math.min(0.85, state.cameraPitch + dy * 0.004));
+        });
+        window.addEventListener('mouseup', () => {
+            mouseDragging = false;
+            cameraTouchActive = false;
+        });
+
+        // Кнопка скрытия предупреждения об ориентации
+        document.getElementById('dismiss-orientation').addEventListener('click', () => {
+            document.getElementById('orientation-warning').classList.remove('active-warning');
+        });
+
+        // Адаптация размера холста при повороте экрана или ресайзе окна
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', onWindowResize);
+        window.addEventListener('orientationchange', () => setTimeout(onWindowResize, 120));
+
+        // ================= ЗАПУСК И ГЛАВНЫЙ ИГРОВОЙ ЦИКЛ =================
+        buildCity();
+        initVehicles();
+        initPedestrians();
+        initMoneyPickups();
+
+        let lastTime = performance.now();
+        let minimapFrameCounter = 0;
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(0.05, (now - lastTime) / 1000);
+            lastTime = now;
+            const elapsed = now * 0.001;
+
+            if (state.mode === 'onfoot') {
+                updatePlayerOnFoot(dt);
+            }
+            updateVehicles(dt);
+            updatePedestrians(dt);
+            updatePickups(dt, elapsed);
+            updateCamera(dt);
+
+            // Рендерим 2D мини-карту каждые 2 кадра для экономии CPU на смартфонах
+            minimapFrameCounter++;
+            if (minimapFrameCounter % 2 === 0) {
+                renderMinimap();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function() {
+            onWindowResize();
+            lastTime = performance.now();
+            requestAnimationFrame(animate);
+        };
+    })();
+    </script>
+</body>
+</html>
